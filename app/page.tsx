@@ -125,6 +125,7 @@ export default function MobileApp() {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(false);
   const [lang, setLang] = useState<'mn'|'en'>('mn');
+  const [mounted, setMounted] = useState(false);
   const [currentView, setCurrentView] = useState<'home'|'profile'>('profile');
   const [activeTab, setActiveTab] = useState<'notified'|'solved'>('notified');
   const [expandedReport, setExpandedReport] = useState<number | null>(null);
@@ -134,6 +135,7 @@ export default function MobileApp() {
   const t = i18n[lang];
 
   useEffect(() => {
+    setMounted(true);
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setIsAuthenticated(!!currentUser);
@@ -179,6 +181,8 @@ export default function MobileApp() {
   };
 
   const displayName = user?.displayName || user?.email?.split('@')[0] || t.name;
+
+  if (!mounted) return null;
 
   if (loadingUser) {
     return <div className="h-screen flex items-center justify-center text-slate-500">Уншиж байна...</div>;
