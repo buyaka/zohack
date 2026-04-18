@@ -1,0 +1,9 @@
+{
+  "name": "hackathon",
+  "description": "Volunteer and issue reporting application",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ],
+  "majorCapabilities": []
+}

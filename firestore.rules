@@ -1,0 +1,68 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Report Validation
+    function isValidReport(data) {
+      let userId = data.get('userId', '');
+      let notes = data.get('notes', '');
+      let location = data.get('location', '');
+      let category = data.get('category', '');
+      let status = data.get('status', '');
+      
+      return userId is string && userId.size() > 0 && userId.size() <= 128 &&
+             userId == request.auth.uid &&
+             (data.get('userEmail', null) == null || (data.userEmail is string && data.userEmail.size() <= 255)) &&
+             (data.get('photoUrl', null) == null || (data.photoUrl is string && data.photoUrl.size() <= 2048)) &&
+             category is string && category.size() <= 100 &&
+             location is string && location.size() <= 2048 &&
+             notes is string && notes.size() <= 10000 &&
+             status in ['sent', 'received', 'processing', 'solved'] &&
+             data.get('createdAt', null) is timestamp;
+    }
+
+    match /reports/{reportId} {
+      // Allow read if owner
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      // Allow create if auth and valid
+      allow create: if isSignedIn() && 
+                      isValidReport(incoming()) && 
+                      incoming().createdAt == request.time &&
+                      incoming().status == 'sent';
+
+      // Allow owner to update specific fields
+      allow update: if isSignedIn() && 
+                      resource.data.userId == request.auth.uid &&
+                      isValidReport(incoming()) &&
+                      incoming().userId == existing().userId &&
+                      incoming().createdAt == existing().createdAt &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['notes', 'category', 'location', 'status']);
+    }
+  }
+}

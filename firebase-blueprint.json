@@ -1,0 +1,26 @@
+{
+  "entities": {
+    "Report": {
+      "title": "Report",
+      "description": "Information about a reported issue",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "category": { "type": "string" },
+        "location": { "type": "string" },
+        "notes": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "category", "location", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/reports/{reportId}": {
+      "schema": "Report",
+      "description": "Collection of issue reports"
+    }
+  }
+}
