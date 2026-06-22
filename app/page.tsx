@@ -1,33 +1,73 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useSyncExternalStore } from 'react';
 import { ChevronLeft, Camera, LogOut } from 'lucide-react';
 import Image from 'next/image';
-import AuthFlow from '@/components/AuthFlow';
-import CameraView from '@/components/CameraView';
-import ReportFlow from '@/components/ReportFlow';
-import EventDetails from '@/components/EventDetails';
-import ReportDetails from '@/components/ReportDetails';
+import dynamic from 'next/dynamic';
+
+const AuthFlow = dynamic(() => import('@/components/AuthFlow'), { ssr: false });
+const CameraView = dynamic(() => import('@/components/CameraView'), { ssr: false });
+const ReportFlow = dynamic(() => import('@/components/ReportFlow'), { ssr: false });
+const EventDetails = dynamic(() => import('@/components/EventDetails'), { ssr: false });
+const ReportDetails = dynamic(() => import('@/components/ReportDetails'), { ssr: false });
+
 import { db, auth } from '@/lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 
 const tFlowData = {
   mn: {
-    vandalism: 'Өмч сүйтгэл',
+    streetLight: 'Гэрэлтүүлэг эвдэрсэн',
     trash: 'Хог хаягдал',
+    roadDamage: 'Замын эвдрэл',
+    signal: 'Гэрлэн дохио',
+    crossing: 'Аюултай гарц',
+    hazard: 'Халтиргаа, ус, мөс',
+    // Fallbacks for old data to prevent English appearing when MN is selected
+    vandalism: 'Өмч сүйтгэл',
     flood: 'Үер ус, тогтоол ус',
     roadwork: 'Авто замын эвдрэл',
-    streetLight: 'Гудамжны гэрэл',
     dust: 'Тоосжилт'
   },
   en: {
+    streetLight: 'Broken streetlight',
+    trash: 'Waste pollution',
+    roadDamage: 'Road damage',
+    signal: 'Signal issue',
+    crossing: 'Unsafe crossing',
+    hazard: 'Surface hazards',
+    // Fallbacks
     vandalism: 'Vandalism',
-    trash: 'Trash',
     flood: 'Flood',
     roadwork: 'Road damage',
-    streetLight: 'Street light',
     dust: 'Dust'
+  }
+};
+
+const tAgencies: any = {
+  mn: {
+    streetLight: 'Нийслэлийн гэрэлтүүлгийн алба / дүүргийн тохижилт',
+    trash: 'Дүүргийн тохижилт, хог тээврийн үйлчилгээ',
+    roadDamage: 'Нийслэлийн Замын хөгжлийн газар',
+    signal: 'Замын хөдөлгөөний удирдлагын төв',
+    crossing: 'Замын хөдөлгөөний удирдлагын төв',
+    hazard: 'Дүүргийн тохижилт / Онцгой байдал',
+    roadwork: 'Нийслэлийн Замын хөгжлийн газар',
+    vandalism: 'Дүүргийн тохижилт',
+    flood: 'Дүүргийн тохижилт / Онцгой байдал',
+    dust: 'Дүүргийн тохижилт'
+  },
+  en: {
+    streetLight: 'Lighting Authority / District Maintenance',
+    trash: 'District Maintenance / Waste Service',
+    roadDamage: 'Road Development Department',
+    signal: 'Traffic Management Center',
+    crossing: 'Traffic Management Center',
+    hazard: 'District Maintenance / Emergency',
+    roadwork: 'Road Development Department',
+    vandalism: 'District Maintenance',
+    flood: 'District Maintenance / Emergency',
+    dust: 'District Maintenance'
   }
 };
 
@@ -38,8 +78,13 @@ const i18n = {
     phone: "+97699999999",
     profileStats: "2 мэдэгдсэн • 10 түүх",
     tabNotified: "Мэдэгдсэн",
-    tabSolved: "Илгээгдсэн",
+    tabSolved: "Шийдэгдсэн",
     btnLogout: "Гарах",
+    hello: "Сайн байна уу",
+    nReports: "мэдэгдсэн",
+    nSolved: "шийдэгдсэн",
+    noReports: "Мэдээлэл олдсонгүй",
+    noSolved: "Шийдэгдсэн мэдээлэл олдсонгүй",
     
     // Home
     statsProjectsLine1: "Оролцсон сайн дурын",
@@ -70,6 +115,8 @@ const i18n = {
     statusProcessing: "Шийдвэрлэж байна",
     statusSolved: "Шийдэгдсэн",
     viewDetails: "Дэлгэрэнгүй үзэх...",
+    viewStatus: "Төлөв харах",
+    collapse: "Хураах",
     reportMessage: "Таны мэдээллийг холбогдох байгууллага хүлээн авч, хянан шалгаж байна."
   },
   en: {
@@ -78,8 +125,15 @@ const i18n = {
     phone: "+97699999999",
     profileStats: "2 reported • 10 history",
     tabNotified: "Reported",
-    tabSolved: "Sent",
+    tabSolved: "Solved",
     btnLogout: "Logout",
+    hello: "Hello",
+    nReports: "reported",
+    nSolved: "solved",
+    noReports: "No reports found",
+    noSolved: "No solved reports found",
+    viewStatus: "View Status",
+    collapse: "Collapse",
 
     // Home
     statsProjectsLine1: "Participated volunteer",
@@ -114,7 +168,12 @@ const i18n = {
   }
 };
 
+const emptySubscribe = () => () => {};
+const getSnapshot = () => true;
+const getServerSnapshot = () => false;
+
 export default function MobileApp() {
+  const isClient = useSyncExternalStore(emptySubscribe, getSnapshot, getServerSnapshot);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
@@ -125,7 +184,6 @@ export default function MobileApp() {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(false);
   const [lang, setLang] = useState<'mn'|'en'>('mn');
-  const [mounted, setMounted] = useState(false);
   const [currentView, setCurrentView] = useState<'home'|'profile'>('profile');
   const [activeTab, setActiveTab] = useState<'notified'|'solved'>('notified');
   const [expandedReport, setExpandedReport] = useState<number | null>(null);
@@ -135,7 +193,6 @@ export default function MobileApp() {
   const t = i18n[lang];
 
   useEffect(() => {
-    setMounted(true);
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setIsAuthenticated(!!currentUser);
@@ -149,10 +206,16 @@ export default function MobileApp() {
 
   useEffect(() => {
     if (!user) return;
-    const q = query(
-      collection(db, 'reports'),
-      where('userId', '==', user.uid)
-    );
+    
+    // If user is admin, fetch ALL reports. Otherwise fetch only their own.
+    const isAdmin = user.email === 'khanzobu2010@gmail.com';
+    const q = isAdmin
+      ? query(collection(db, 'reports'))
+      : query(
+          collection(db, 'reports'),
+          where('userId', '==', user.uid)
+        );
+
     const unsub = onSnapshot(q, 
       (snap) => {
         const reports = snap.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
@@ -166,6 +229,7 @@ export default function MobileApp() {
       },
       (error) => {
         console.error("Error fetching reports:", error);
+        alert(`Зөвшөөрөлгүй хандалт (User: ${user.email}). ${error.message}`);
       }
     );
     return () => unsub();
@@ -182,7 +246,7 @@ export default function MobileApp() {
 
   const displayName = user?.displayName || user?.email?.split('@')[0] || t.name;
 
-  if (!mounted) return null;
+  if (!isClient) return null;
 
   if (loadingUser) {
     return <div className="h-screen flex items-center justify-center text-slate-500">Уншиж байна...</div>;
@@ -223,7 +287,7 @@ export default function MobileApp() {
   }
 
   if (showReportDetails) {
-    return <ReportDetails onClose={() => setShowReportDetails(null)} report={showReportDetails} isDark={isDark} lang={lang} />;
+    return <ReportDetails onClose={() => setShowReportDetails(null)} report={showReportDetails} isDark={isDark} lang={lang} user={user} />;
   }
 
   return (
@@ -270,12 +334,15 @@ export default function MobileApp() {
                       <Image src="https://picsum.photos/seed/doge/120/120" alt="Avatar" fill className="object-cover" referrerPolicy="no-referrer" />
                    </div>
                    <div>
-                      <h1 className={`text-[20px] font-medium leading-tight mb-0.5 transition-colors ${isDark ? 'text-white' : 'text-slate-800'}`}>{displayName}</h1>
-                      <p className={`text-[13px] mb-0.5 transition-colors ${isDark ? 'text-[#8892b0]' : 'text-slate-600'}`}>Сайн байна уу</p>
+                      <h1 className={`text-[20px] font-medium leading-tight mb-0.5 transition-colors ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                        {displayName}
+                        {user?.email === 'khanzobu2010@gmail.com' && (
+                           <span className="ml-2 px-1.5 py-0.5 rounded-md bg-blue-500 font-bold text-[10px] uppercase text-white align-middle inline-flex items-center justify-center">Admin</span>
+                        )}
+                      </h1>
+                      <p className={`text-[13px] mb-0.5 transition-colors ${isDark ? 'text-[#8892b0]' : 'text-slate-600'}`}>{t.hello}</p>
                       <p className={`text-[12px] transition-colors ${isDark ? 'text-[#8892b0]' : 'text-slate-500'}`}>
-                        {lang === 'mn' 
-                          ? `${myReports.filter((r: any) => r.status !== 'solved').length} мэдэгдсэн • ${myReports.filter((r: any) => r.status === 'solved').length} шийдэгдсэн` 
-                          : `${myReports.filter((r: any) => r.status !== 'solved').length} reported • ${myReports.filter((r: any) => r.status === 'solved').length} solved`}
+                        {myReports.filter((r: any) => r.status !== 'solved').length} {t.nReports} • {myReports.filter((r: any) => r.status === 'solved').length} {t.nSolved}
                       </p>
                    </div>
                 </div>
@@ -308,21 +375,19 @@ export default function MobileApp() {
                 {activeTab === 'notified' ? (
                    <div className="flex flex-col gap-4">
                       {myReports.filter(r => r.status !== 'solved').length === 0 ? (
-                        <div className={`text-center py-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Мэдээлэл олдсонгүй</div>
+                        <div className={`text-center py-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{t.noReports}</div>
                       ) : (
                         myReports.filter(r => r.status !== 'solved').map((report, idx) => (
                           <div key={report.id} className={`rounded-[24px] p-5 shadow-sm border transition-all duration-300 relative overflow-hidden ${isDark ? 'bg-[#1a2235] border-white/5' : 'bg-white border-slate-200'} ${expandedReport === idx ? 'shadow-md shadow-blue-500/5 border-blue-100' : ''}`}>
                              <div className="flex justify-between items-start mb-6">
-                                <h3 className={`font-medium text-[15px] transition-colors ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                                  {
-                                    report.category === 'vandalism' ? tFlowData[lang].vandalism :
-                                    report.category === 'trash' ? tFlowData[lang].trash :
-                                    report.category === 'flood' ? tFlowData[lang].flood :
-                                    report.category === 'roadwork' ? tFlowData[lang].roadwork :
-                                    report.category === 'streetLight' ? tFlowData[lang].streetLight :
-                                    report.category === 'dust' ? tFlowData[lang].dust : report.category
-                                  }
-                                </h3>
+                                <div className="flex-1">
+                                   <h3 className={`font-medium text-[15px] transition-colors ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                                     {tFlowData[lang][report.category as keyof typeof tFlowData['mn']] || report.category}
+                                   </h3>
+                                   <p className={`text-[12px] opacity-70 mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                     {tAgencies[lang][report.category] || (lang === 'mn' ? 'Холбогдох байгууллага' : 'Relevant Authority')}
+                                   </p>
+                                </div>
                                 <span className={`text-[12px] transition-colors ${isDark ? 'text-[#8892b0]' : 'text-slate-500'}`}>
                                   {report.createdAt ? new Date(report.createdAt.toMillis ? report.createdAt.toMillis() : (report.createdAt.seconds * 1000)).toLocaleDateString() : 'Саяхан'}
                                 </span>
@@ -362,7 +427,7 @@ export default function MobileApp() {
 
                              <div className="text-right mt-4 pt-4 border-t border-slate-100 flex justify-between items-center">
                                 <button onClick={() => setExpandedReport(expandedReport === idx ? null : idx)} className={`text-[13px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                                  {expandedReport === idx ? 'Хураах' : 'Төлөв харах'}
+                                  {expandedReport === idx ? t.collapse : t.viewStatus}
                                 </button>
                                 <button onClick={() => setShowReportDetails(report)} className={`text-[13px] font-medium underline underline-offset-2 ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-800'} transition-colors`}>
                                    {t.viewDetails}
@@ -376,21 +441,19 @@ export default function MobileApp() {
                 ) : (
                    <div className="flex flex-col gap-4">
                       {myReports.filter(r => r.status === 'solved').length === 0 ? (
-                        <div className={`text-center py-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Шийдэгдсэн мэдэглэл олдсонгүй</div>
+                        <div className={`text-center py-10 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{t.noSolved}</div>
                       ) : (
                         myReports.filter(r => r.status === 'solved').map((report, idx) => (
                           <div key={report.id} className={`rounded-[24px] p-5 shadow-sm border transition-all duration-300 relative overflow-hidden ${isDark ? 'bg-[#1a2235] border-white/5' : 'bg-white border-slate-200'}`}>
                              <div className="flex justify-between items-start mb-6">
-                                <h3 className={`font-medium text-[15px] transition-colors ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                                  {
-                                    report.category === 'vandalism' ? tFlowData[lang].vandalism :
-                                    report.category === 'trash' ? tFlowData[lang].trash :
-                                    report.category === 'flood' ? tFlowData[lang].flood :
-                                    report.category === 'roadwork' ? tFlowData[lang].roadwork :
-                                    report.category === 'streetLight' ? tFlowData[lang].streetLight :
-                                    report.category === 'dust' ? tFlowData[lang].dust : report.category
-                                  }
-                                </h3>
+                                <div className="flex-1">
+                                   <h3 className={`font-medium text-[15px] transition-colors ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                                     {tFlowData[lang][report.category as keyof typeof tFlowData['mn']] || report.category}
+                                   </h3>
+                                   <p className={`text-[12px] opacity-70 mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                     {tAgencies[lang][report.category] || (lang === 'mn' ? 'Холбогдох байгууллага' : 'Relevant Authority')}
+                                   </p>
+                                </div>
                                 <span className={`text-[12px] transition-colors ${isDark ? 'text-[#8892b0]' : 'text-slate-500'}`}>
                                   {report.createdAt ? new Date(report.createdAt.toMillis ? report.createdAt.toMillis() : (report.createdAt.seconds * 1000)).toLocaleDateString() : 'Саяхан'}
                                 </span>

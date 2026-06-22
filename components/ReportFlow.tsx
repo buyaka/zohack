@@ -19,23 +19,19 @@ const tFlow = {
     change: 'Солих',
     addNote: 'Нэмэлт тайлбар оруулах',
     correctLoc: 'Зөв байршил',
-    vandalism: 'Өмч сүйтгэл',
+    streetLight: 'Гэрэлтүүлэг эвдэрсэн',
     trash: 'Хог хаягдал',
-    flood: 'Үер ус, тогтоол ус',
-    roadwork: 'Авто замын эвдрэл',
-    streetLight: 'Гудамжны гэрэл',
-    dust: 'Тоосжилт',
+    roadDamage: 'Замын эвдрэл',
+    signal: 'Гэрлэн дохио',
+    crossing: 'Аюултай гарц',
+    hazard: 'Халтиргаа, ус, мөс',
     aiWarning: 'Тайлбар: Байршлыг AI-аар тодорхойлсон тул байршил буруу орсон байх магадлалтай. Ийм тохиолдолд байршлыг гараар засах / солих боломжтой.',
     changeLocBtn: 'Байршлыг солих',
     enterLocPlaceholder: 'Байршлыг оруулах...',
     confirmBtn: 'Баталгаажуулах',
     successMsg1: 'Таны мэдээллийг хүлээн',
     successMsg2: 'авлаа.',
-    aiAnalyzing: 'AI зургийг шинжилж байна...',
-    aiSuggested: 'AI санал болгож буй ангилал',
-    aiNotConfident: 'AI энэ зургийг тодорхойлж чадсангүй. Гараар сонгоно уу.',
-    aiNotRelevant: 'Анхааруулга: AI энэ зураг нийтийн дэд бүтцийн асуудал биш байж магадгүй гэж үзэв. Шалгаад үргэлжлүүлнэ үү.',
-    aiCheckCategory: 'AI-н сонгосон ангиллыг шалгаж, шаардлагатай бол солино уу.',
+    backHome: 'Буцах',
   },
   en: {
     fetchingLoc: 'Fetching location...',
@@ -46,33 +42,29 @@ const tFlow = {
     change: 'Change',
     addNote: 'Add description',
     correctLoc: 'Correct location',
-    vandalism: 'Vandalism',
-    trash: 'Trash',
-    flood: 'Flood',
-    roadwork: 'Road damage',
-    streetLight: 'Street light',
-    dust: 'Dust',
+    streetLight: 'Broken streetlight',
+    trash: 'Waste pollution',
+    roadDamage: 'Road damage',
+    signal: 'Signal issue',
+    crossing: 'Unsafe crossing',
+    hazard: 'Surface hazards',
     aiWarning: 'Note: Location determined by AI may be incorrect. You can manually adjust or change it.',
     changeLocBtn: 'Change location',
     enterLocPlaceholder: 'Enter location...',
     confirmBtn: 'Confirm',
     successMsg1: 'Your information has',
     successMsg2: 'been received.',
-    aiAnalyzing: 'AI is analyzing the photo...',
-    aiSuggested: 'AI-suggested category',
-    aiNotConfident: 'AI could not confidently classify this photo. Please choose manually.',
-    aiNotRelevant: 'Note: AI thinks this photo may not show a public infrastructure issue. Please double-check before continuing.',
-    aiCheckCategory: 'Please review the AI-selected category and change it if needed.',
+    backHome: 'Back to Home',
   }
 };
 
 const categoryIcons = {
-  vandalism: <AlertTriangle size={28} strokeWidth={1.5} />,
-  trash: <Trash2 size={28} strokeWidth={1.5} />,
-  flood: <Droplets size={28} strokeWidth={1.5} />,
-  roadwork: <Hammer size={28} strokeWidth={1.5} />,
   streetLight: <Lightbulb size={28} strokeWidth={1.5} />,
-  dust: <Wind size={28} strokeWidth={1.5} />
+  trash: <Trash2 size={28} strokeWidth={1.5} />,
+  roadDamage: <Hammer size={28} strokeWidth={1.5} />,
+  signal: <AlertTriangle size={28} strokeWidth={1.5} />,
+  crossing: <Target size={28} strokeWidth={1.5} />,
+  hazard: <Droplets size={28} strokeWidth={1.5} />
 };
 
 type CategoryKey = keyof typeof categoryIcons;
@@ -80,70 +72,14 @@ type CategoryKey = keyof typeof categoryIcons;
 export default function ReportFlow({ onClose, lang, photoUrl, user }: { onClose: () => void, lang: 'mn' | 'en', photoUrl: string | null, user: User | null }) {
   const [step, setStep] = useState<'map' | 'ai_warning' | 'manual' | 'details' | 'success'>('map');
   const [showCategories, setShowCategories] = useState(false);
-  const [category, setCategory] = useState<CategoryKey>('roadwork');
+  const [category, setCategory] = useState<CategoryKey>('roadDamage');
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentAddress, setCurrentAddress] = useState<string | null>(null);
   const [isFetchingGeo, setIsFetchingGeo] = useState(false);
   const [userPos, setUserPos] = useState<[number, number] | undefined>(undefined);
 
-  // AI photo classification state
-  const [isClassifying, setIsClassifying] = useState(false);
-  const [aiPicked, setAiPicked] = useState(false); // true once AI has set a category
-  const [aiConfidence, setAiConfidence] = useState<number | null>(null);
-  const [aiIsRelevant, setAiIsRelevant] = useState<boolean | null>(null);
-  const [aiReason, setAiReason] = useState<string>('');
-  const [aiError, setAiError] = useState<string | null>(null);
-
   const t = tFlow[lang];
-
-  // When a photo is available, ask the AI to classify it.
-  useEffect(() => {
-    if (!photoUrl) return;
-
-    let cancelled = false;
-
-    const classify = async () => {
-      setIsClassifying(true);
-      setAiError(null);
-      try {
-        const res = await fetch('/api/classify-report', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageUrl: photoUrl }),
-        });
-
-        if (!res.ok) {
-          throw new Error('Classification request failed');
-        }
-
-        const data = await res.json();
-        if (cancelled) return;
-
-        if (data?.category) {
-          setCategory(data.category as CategoryKey);
-          setAiPicked(true);
-          setAiConfidence(typeof data.confidence === 'number' ? data.confidence : null);
-          setAiIsRelevant(typeof data.isRelevant === 'boolean' ? data.isRelevant : null);
-          setAiReason(typeof data.reason === 'string' ? data.reason : '');
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error('AI classification error:', err);
-          setAiError('AI classification unavailable, please select manually.');
-        }
-      } finally {
-        if (!cancelled) setIsClassifying(false);
-      }
-    };
-
-    classify();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [photoUrl]);
-
 
   const reverseGeocode = async (lat: number, lng: number) => {
     setIsFetchingGeo(true);
@@ -201,9 +137,7 @@ export default function ReportFlow({ onClose, lang, photoUrl, user }: { onClose:
         location: currentAddress || t.locValue, // Use real location if available
         notes: notes,
         status: 'sent',
-        createdAt: serverTimestamp(),
-        aiClassified: aiPicked,
-        aiConfidence: aiConfidence ?? null,
+        createdAt: serverTimestamp()
       });
       console.log("Report saved to firestore");
       setStep('success');
@@ -223,9 +157,15 @@ export default function ReportFlow({ onClose, lang, photoUrl, user }: { onClose:
               <p className="text-[#3c4a3e] text-[17px] mb-8 leading-relaxed font-medium">
                  {t.successMsg1}<br/>{t.successMsg2}
               </p>
-              <div onClick={onClose} className="w-16 h-16 rounded-full border border-green-500 flex items-center justify-center cursor-pointer active:scale-95 transition-transform">
+              <div className="w-16 h-16 rounded-full border border-green-500 flex items-center justify-center mb-8">
                  <Check className="text-green-500" strokeWidth={1.5} size={32} />
               </div>
+              <button 
+                onClick={onClose}
+                className="w-full bg-[#2d50a0] text-white font-medium py-3 rounded-xl active:scale-[0.98] transition-all shadow-md mt-2"
+              >
+                {t.backHome}
+              </button>
            </div>
         ) : (
            <>
@@ -240,12 +180,7 @@ export default function ReportFlow({ onClose, lang, photoUrl, user }: { onClose:
                  <button onClick={onClose} className="w-10 h-10 flex items-center justify-center bg-white/20 backdrop-blur-md text-white rounded-full active:scale-95 transition-transform">
                     <ChevronLeft size={24} />
                  </button>
-                 <div className="flex-1 bg-white rounded-md flex items-center overflow-hidden h-11 shadow-md">
-                    <input type="text" placeholder={t.searchLoc} className="flex-1 bg-transparent px-4 outline-none text-slate-800 text-[15px]" readOnly />
-                    <button className="w-12 h-11 bg-[#2d50a0] flex flex-col items-center justify-center text-white shrink-0">
-                       <Search size={20} />
-                    </button>
-                 </div>
+                 {/* Search bar removed as requested */}
               </div>
 
               {/* Center Map Pin */}
@@ -266,7 +201,7 @@ export default function ReportFlow({ onClose, lang, photoUrl, user }: { onClose:
                          {currentAddress ? currentAddress : t.fetchingLoc}
                        </p>
                     </div>
-                    <button onClick={() => setStep('ai_warning')} className="bg-white rounded-full pl-6 pr-2 py-2 flex items-center gap-4 shadow-xl active:scale-95 transition-transform">
+                    <button onClick={() => setStep('details')} className="bg-white rounded-full pl-6 pr-2 py-2 flex items-center gap-4 shadow-xl active:scale-95 transition-transform">
                        <span className="text-[#3c5ab4] font-medium text-[16px]">{t.selectLoc}</span>
                        <div className="w-10 h-10 bg-[#3c5ab4] rounded-full flex items-center justify-center text-white shadow-inner">
                           <ArrowUp size={20} />
@@ -275,77 +210,17 @@ export default function ReportFlow({ onClose, lang, photoUrl, user }: { onClose:
                  </div>
               )}
 
-              {step === 'ai_warning' && (
-                 <div className="absolute bottom-0 w-full bg-white rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.15)] p-6 pb-12 animate-in slide-in-from-bottom-10 z-20">
-                    <div className="flex gap-2 text-[14px] leading-tight mb-6">
-                       <span className="font-semibold text-[#1877f2]">{t.location}</span>
-                       <span className="text-slate-700">{currentAddress || 'Байршил тодорхойлж байна...'}</span>
-                    </div>
-                    <div className="bg-[#f0ece1] p-4 rounded-xl mb-6">
-                       <p className="text-slate-700 text-[13px] leading-relaxed">
-                          <span className="font-semibold">{t.aiWarning.split(': ')[0]}:</span> {t.aiWarning.split(': ').slice(1).join(': ')}
-                       </p>
-                    </div>
-                    <button onClick={() => setStep('manual')} className="w-full bg-[#a3af9e] hover:bg-[#8f9b8a] text-white py-3.5 rounded-xl font-medium text-[15px] active:scale-[0.98] transition-colors">
-                       {t.changeLocBtn}
-                    </button>
-                 </div>
-              )}
-
-              {step === 'manual' && (
-                 <div className="absolute bottom-0 w-full bg-[#f4f4ec] rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.15)] p-6 pb-12 animate-in slide-in-from-bottom-10 z-20 border-t border-[#e8e6d9]">
-                    <textarea 
-                      placeholder={t.enterLocPlaceholder}
-                      value={currentAddress || ''}
-                      onChange={(e) => setCurrentAddress(e.target.value)}
-                      className="w-full h-24 bg-[#e8e6d9] rounded-xl p-4 outline-none text-slate-700 text-[14px] resize-none mb-6 border border-[#d5d2c1] focus:border-[#65b340] transition-colors"
-                    />
-                    <button onClick={() => setStep('details')} className="w-full bg-[#65b340] hover:bg-green-600 text-white py-3.5 rounded-full font-medium text-[15px] active:scale-[0.98] transition-transform shadow-sm">
-                       {t.confirmBtn}
-                    </button>
-                 </div>
-              )}
-
               {step === 'details' && (
                  <div className="absolute bottom-0 w-full bg-white rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.15)] p-6 pb-12 animate-in slide-in-from-bottom-10 z-20">
-                    <div className="flex gap-2 text-[14px] leading-tight mb-6">
-                       <span className="font-semibold text-[#2d50a0]">{t.location}</span>
-                       <span className="text-slate-700">{currentAddress || 'Байршил тодорхойлж байна...'}</span>
+                    <div className="flex items-center justify-between mb-6 gap-2">
+                       <div className="flex gap-2 text-[14px] leading-tight flex-1 min-w-0">
+                          <span className="font-semibold text-[#2d50a0] break-keep">{t.location}</span>
+                          <span className="text-slate-700 truncate">{currentAddress || 'Байршил тодорхойлж байна...'}</span>
+                       </div>
+                       <button onClick={() => setStep('manual')} className="text-[12px] text-[#2d50a0] font-medium underline shrink-0">
+                          {t.change}
+                       </button>
                     </div>
-
-                    {isClassifying && (
-                       <div className="flex items-center gap-3 bg-blue-50 border border-blue-100 rounded-xl p-3 mb-4">
-                          <div className="w-4 h-4 border-2 border-blue-400/30 border-t-blue-500 rounded-full animate-spin shrink-0"></div>
-                          <span className="text-[13px] text-blue-700 font-medium">{t.aiAnalyzing}</span>
-                       </div>
-                    )}
-
-                    {!isClassifying && aiPicked && (
-                       <div className={`rounded-xl p-3 mb-4 border ${aiIsRelevant === false ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-100'}`}>
-                          <div className="flex items-center justify-between mb-1">
-                             <span className={`text-[12px] font-semibold uppercase tracking-wide ${aiIsRelevant === false ? 'text-amber-700' : 'text-emerald-700'}`}>
-                                {t.aiSuggested}
-                             </span>
-                             {aiConfidence !== null && (
-                                <span className={`text-[12px] font-medium ${aiIsRelevant === false ? 'text-amber-600' : 'text-emerald-600'}`}>
-                                   {Math.round(aiConfidence * 100)}%
-                                </span>
-                             )}
-                          </div>
-                          {aiReason && (
-                             <p className="text-[13px] text-slate-600 leading-snug mb-1">{aiReason}</p>
-                          )}
-                          <p className="text-[12px] text-slate-500 leading-snug">
-                             {aiIsRelevant === false ? t.aiNotRelevant : t.aiCheckCategory}
-                          </p>
-                       </div>
-                    )}
-
-                    {!isClassifying && aiError && (
-                       <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4">
-                          <p className="text-[13px] text-slate-500">{t.aiNotConfident}</p>
-                       </div>
-                    )}
                     
                     <div className="flex items-center justify-between mb-4 gap-3">
                        <div className="border border-blue-200 rounded-full px-5 py-2 text-[14px] text-[#2d50a0] font-medium flex-1 text-center truncate">
@@ -365,7 +240,21 @@ export default function ReportFlow({ onClose, lang, photoUrl, user }: { onClose:
                     />
 
                     <button onClick={handleConfirm} disabled={isSubmitting} className="w-full bg-[#2d50a0] hover:bg-blue-800 text-white py-3.5 rounded-full font-medium text-[16px] active:scale-[0.98] transition-transform shadow-md disabled:opacity-50">
-                       {isSubmitting ? 'Loading...' : t.correctLoc}
+                       {isSubmitting ? 'Loading...' : t.confirmBtn}
+                    </button>
+                 </div>
+              )}
+
+              {step === 'manual' && (
+                 <div className="absolute bottom-0 w-full bg-[#f4f4ec] rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.15)] p-6 pb-12 animate-in slide-in-from-bottom-10 z-20 border-t border-[#e8e6d9]">
+                    <textarea 
+                      placeholder={t.enterLocPlaceholder}
+                      value={currentAddress || ''}
+                      onChange={(e) => setCurrentAddress(e.target.value)}
+                      className="w-full h-24 bg-[#e8e6d9] rounded-xl p-4 outline-none text-slate-700 text-[14px] resize-none mb-6 border border-[#d5d2c1] focus:border-[#65b340] transition-colors"
+                    />
+                    <button onClick={() => setStep('details')} className="w-full bg-[#65b340] hover:bg-green-600 text-white py-3.5 rounded-full font-medium text-[15px] active:scale-[0.98] transition-transform shadow-sm">
+                       {t.confirmBtn}
                     </button>
                  </div>
               )}
