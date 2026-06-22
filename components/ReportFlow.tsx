@@ -31,6 +31,11 @@ const tFlow = {
     confirmBtn: 'Баталгаажуулах',
     successMsg1: 'Таны мэдээллийг хүлээн',
     successMsg2: 'авлаа.',
+    aiAnalyzing: 'AI зургийг шинжилж байна...',
+    aiSuggested: 'AI санал болгож буй ангилал',
+    aiNotConfident: 'AI энэ зургийг тодорхойлж чадсангүй. Гараар сонгоно уу.',
+    aiNotRelevant: 'Анхааруулга: AI энэ зураг нийтийн дэд бүтцийн асуудал биш байж магадгүй гэж үзэв. Шалгаад үргэлжлүүлнэ үү.',
+    aiCheckCategory: 'AI-н сонгосон ангиллыг шалгаж, шаардлагатай бол солино уу.',
   },
   en: {
     fetchingLoc: 'Fetching location...',
@@ -53,6 +58,11 @@ const tFlow = {
     confirmBtn: 'Confirm',
     successMsg1: 'Your information has',
     successMsg2: 'been received.',
+    aiAnalyzing: 'AI is analyzing the photo...',
+    aiSuggested: 'AI-suggested category',
+    aiNotConfident: 'AI could not confidently classify this photo. Please choose manually.',
+    aiNotRelevant: 'Note: AI thinks this photo may not show a public infrastructure issue. Please double-check before continuing.',
+    aiCheckCategory: 'Please review the AI-selected category and change it if needed.',
   }
 };
 
@@ -77,7 +87,63 @@ export default function ReportFlow({ onClose, lang, photoUrl, user }: { onClose:
   const [isFetchingGeo, setIsFetchingGeo] = useState(false);
   const [userPos, setUserPos] = useState<[number, number] | undefined>(undefined);
 
+  // AI photo classification state
+  const [isClassifying, setIsClassifying] = useState(false);
+  const [aiPicked, setAiPicked] = useState(false); // true once AI has set a category
+  const [aiConfidence, setAiConfidence] = useState<number | null>(null);
+  const [aiIsRelevant, setAiIsRelevant] = useState<boolean | null>(null);
+  const [aiReason, setAiReason] = useState<string>('');
+  const [aiError, setAiError] = useState<string | null>(null);
+
   const t = tFlow[lang];
+
+  // When a photo is available, ask the AI to classify it.
+  useEffect(() => {
+    if (!photoUrl) return;
+
+    let cancelled = false;
+
+    const classify = async () => {
+      setIsClassifying(true);
+      setAiError(null);
+      try {
+        const res = await fetch('/api/classify-report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: photoUrl }),
+        });
+
+        if (!res.ok) {
+          throw new Error('Classification request failed');
+        }
+
+        const data = await res.json();
+        if (cancelled) return;
+
+        if (data?.category) {
+          setCategory(data.category as CategoryKey);
+          setAiPicked(true);
+          setAiConfidence(typeof data.confidence === 'number' ? data.confidence : null);
+          setAiIsRelevant(typeof data.isRelevant === 'boolean' ? data.isRelevant : null);
+          setAiReason(typeof data.reason === 'string' ? data.reason : '');
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('AI classification error:', err);
+          setAiError('AI classification unavailable, please select manually.');
+        }
+      } finally {
+        if (!cancelled) setIsClassifying(false);
+      }
+    };
+
+    classify();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [photoUrl]);
+
 
   const reverseGeocode = async (lat: number, lng: number) => {
     setIsFetchingGeo(true);
@@ -135,7 +201,9 @@ export default function ReportFlow({ onClose, lang, photoUrl, user }: { onClose:
         location: currentAddress || t.locValue, // Use real location if available
         notes: notes,
         status: 'sent',
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
+        aiClassified: aiPicked,
+        aiConfidence: aiConfidence ?? null,
       });
       console.log("Report saved to firestore");
       setStep('success');
@@ -244,6 +312,40 @@ export default function ReportFlow({ onClose, lang, photoUrl, user }: { onClose:
                        <span className="font-semibold text-[#2d50a0]">{t.location}</span>
                        <span className="text-slate-700">{currentAddress || 'Байршил тодорхойлж байна...'}</span>
                     </div>
+
+                    {isClassifying && (
+                       <div className="flex items-center gap-3 bg-blue-50 border border-blue-100 rounded-xl p-3 mb-4">
+                          <div className="w-4 h-4 border-2 border-blue-400/30 border-t-blue-500 rounded-full animate-spin shrink-0"></div>
+                          <span className="text-[13px] text-blue-700 font-medium">{t.aiAnalyzing}</span>
+                       </div>
+                    )}
+
+                    {!isClassifying && aiPicked && (
+                       <div className={`rounded-xl p-3 mb-4 border ${aiIsRelevant === false ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-100'}`}>
+                          <div className="flex items-center justify-between mb-1">
+                             <span className={`text-[12px] font-semibold uppercase tracking-wide ${aiIsRelevant === false ? 'text-amber-700' : 'text-emerald-700'}`}>
+                                {t.aiSuggested}
+                             </span>
+                             {aiConfidence !== null && (
+                                <span className={`text-[12px] font-medium ${aiIsRelevant === false ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                   {Math.round(aiConfidence * 100)}%
+                                </span>
+                             )}
+                          </div>
+                          {aiReason && (
+                             <p className="text-[13px] text-slate-600 leading-snug mb-1">{aiReason}</p>
+                          )}
+                          <p className="text-[12px] text-slate-500 leading-snug">
+                             {aiIsRelevant === false ? t.aiNotRelevant : t.aiCheckCategory}
+                          </p>
+                       </div>
+                    )}
+
+                    {!isClassifying && aiError && (
+                       <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4">
+                          <p className="text-[13px] text-slate-500">{t.aiNotConfident}</p>
+                       </div>
+                    )}
                     
                     <div className="flex items-center justify-between mb-4 gap-3">
                        <div className="border border-blue-200 rounded-full px-5 py-2 text-[14px] text-[#2d50a0] font-medium flex-1 text-center truncate">
