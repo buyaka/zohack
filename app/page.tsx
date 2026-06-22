@@ -9,7 +9,7 @@ const AuthFlow = dynamic(() => import('@/components/AuthFlow'), { ssr: false });
 const CameraView = dynamic(() => import('@/components/CameraView'), { ssr: false });
 const ReportFlow = dynamic(() => import('@/components/ReportFlow'), { ssr: false });
 const EventDetails = dynamic(() => import('@/components/EventDetails'), { ssr: false });
-const ReportDetails = dynamic(() => import('@/components/ReportDetails'), { ssr: false });
+import ReportDetails from '@/components/ReportDetails';
 
 import { db, auth } from '@/lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
